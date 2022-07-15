@@ -1,0 +1,8 @@
+# See https://github.com/thedodd/trunk/blob/master/Trunk.toml for all possibilities
+
+[build]
+release = true
+
+[serve]
+address = "127.0.0.1"
+port = 26026
