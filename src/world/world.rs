@@ -1,25 +1,17 @@
 pub struct World {
-    pub renderable: WorldRenderable,
-} impl World {
-    pub fn new(renderable: WorldRenderable) -> Self {
-        Self {
-            renderable: renderable,
-        }
-    }
-}
-
-pub struct WorldRenderable {
     pub width: f32,
     pub height: f32,
-    pub objects_rendered: Vec<Box<Object::Objects::WorldObject>>,
+    pub objects_rendered: Vec<Object::Objects::WorldObject>,
     pub lights_rendered: Vec<Object::Objects::LightObject>,
-} impl WorldRenderable {
+    pub start_time: wasm_timer::Instant,
+} impl World {
     pub fn new(width: f32, height: f32) -> Self {
         Self {
             width: width,
             height: height,
             objects_rendered: Vec::new(),
             lights_rendered: Vec::new(),
+            start_time: wasm_timer::Instant::now(),
         }
     }
 }
@@ -27,6 +19,10 @@ pub struct WorldRenderable {
 pub mod Object {
 
     pub mod Objects {
+        use std::time::Duration;
+
+        use crate::world::render_world_layers::{Layer, Pixel};
+
 
         pub struct LightObject {
             pub x: f32,
@@ -47,95 +43,72 @@ pub mod Object {
         }
 
         pub enum WorldObjectData {
-            Rectangle((f32, f32, f32, f32, u8, u8, u8)),
-            Image((Vec<u8>, u32, u32, f32, f32, f32, f32)),
+            Rectangle { color: Pixel, },
+            Image { rgba: Vec<u8>, width: usize, height: usize, },
+        }
+        pub struct WorldObject_State {
+            pub width: usize,
+            pub height: usize,
+            pub data: WorldObjectData,
+            pub layer: Layer,
+        }
+        pub struct WorldObject_Fns {
+            pub draw_init: Box<dyn Fn(&mut WorldObject_State) -> ()>,
+            pub draw_again: Box<dyn Fn(&mut WorldObject_State, &Duration) -> ()>,
         }
         pub struct WorldObject {
-            pub data: WorldObjectData,
-            //pub contains_coordinate_maybe: Box<dyn Fn() -> bool>,
-            //pub contains_coordinate_definitely: Box<dyn Fn() -> bool>,
-
-            //                          ( self ,  w ,  h ,  w ,  h , data as rgba )
-            pub draw_init: Box<dyn Fn(&Self, u32, u32, f32, f32, &mut Vec<u8>) -> ()>,
-            pub draw_required: bool,
-            pub draw_again: Box<dyn Fn(&Self, u32, u32, f32, f32, &mut Vec<u8>) -> ()>,
+            pub state: WorldObject_State,
+            pub fns: WorldObject_Fns,
         } impl WorldObject {
-            pub fn new(data_and_type: WorldObjectData) -> Self {
-                match data_and_type {
-                    WorldObjectData::Rectangle(_) => Self {
-                        data: data_and_type,
-                        draw_init: Box::new(|s: &Self, widthpx: u32, heightpx: u32, widthrel: f32, heightrel: f32, data: &mut Vec<u8>| {
-                            if let WorldObjectData::Rectangle((x, y, w, h, r, g, b)) = s.data {
-                                let widthf = widthpx as f32 / widthrel; // factors to convert from relative positions to pixel coordinates
-                                let heightf = heightpx as f32 / heightrel;
-
-                                let xi = (x * widthf) as usize; // rect pos in pixels
-                                let yi = (y * heightf) as usize;
-                                let wi = (w * widthf) as usize; // rect size in pixels
-                                let hi = (h * heightf) as usize;
-
-                                // draw
-                                for y in yi..yi+hi {
-                                    let mut index = 4 /* bit depth */ * (widthpx as usize * y + xi); // go down (to y~dyn) and to the right (to xi~const), ending up at the index of the first pixel in this row.
-                                    for _/*x*/ in 0..wi {
-                                        data[index] = r;
-                                        index += 1;
-                                        data[index] = g;
-                                        index += 1;
-                                        data[index] = b;
-                                        index += 1;
-                                        data[index] = 255;
-                                        index += 1;
+            pub fn new_rel(data_and_type: WorldObjectData, pos_x: f32, pos_y: f32, pos_w: f32, pos_h: f32, width: usize, height: usize) -> Self {
+                let w = width as f32;
+                let h = height as f32;
+                Self::new_abs(data_and_type, (pos_x * w).round() as usize, (pos_y * h).round() as usize, (pos_w * w).round() as usize, (pos_h * h).round() as usize, width, height)
+            }
+            pub fn new_abs(data_and_type: WorldObjectData, pos_x: usize, pos_y: usize, pos_w: usize, pos_h: usize, width: usize, height: usize) -> Self {
+                let state = WorldObject_State {
+                    width: width,
+                    height: height,
+                    data: data_and_type,
+                    layer: Layer::new(pos_x, pos_y, pos_w, pos_h, width, height),
+                };
+                match state.data {
+                    WorldObjectData::Rectangle {..} => Self {
+                        state: state,
+                        fns: WorldObject_Fns {
+                            draw_init: Box::new(|state: &mut WorldObject_State| {
+                                if let WorldObjectData::Rectangle { color, } = &mut state.data {
+                                    let layer = &mut state.layer;
+                                    for y in 0..layer.pos_h {
+                                        let line = &mut layer.pixel_data[y];
+                                        for x in 0..layer.pos_w {
+                                            line[x] = color.clone();
+                                        }
                                     }
                                 }
-                            }
-                        }),
-                        draw_required: false,
-                        draw_again: Box::new(|s: &Self, widthpx: u32, heightpx: u32, widthrel: f32, heightrel: f32, data: &mut Vec<u8>| {
-                        }),
+                            }),
+                            draw_again: Box::new(|state: &mut WorldObject_State, duration: &Duration| {
+                            }),
+                        }
                     },
-                    WorldObjectData::Image(_) => Self {
-                        data: data_and_type,
-                        draw_init:  Box::new(|s: &Self, widthpx: u32, heightpx: u32, widthrel: f32, heightrel: f32, data: &mut Vec<u8>| {
-                            if let WorldObjectData::Image((bytes, widthimg, heightimg, x_rel, y_rel, w_rel, h_rel)) = &s.data {
-                                let widthimg = widthimg.to_owned() as usize;
-                                let heightimg = heightimg.to_owned() as usize;
-                                let widthimgf = widthimg as f32;
-                                let heightimgf = heightimg as f32;
-                                let widthpxs = widthpx as usize;
-                                let heightpxsf = heightpx as usize;
-                                let widthpxf = widthpx as f32;
-                                let heightpxf = heightpx as f32;
-
-                                // the pixel position and size of the image once it is drawn to the map
-                                let x_abs = (x_rel * widthpxf / widthrel) as usize;
-                                let y_abs = (y_rel * heightpxf / heightrel) as usize;
-                                let w_abs = (w_rel * widthpxf / widthrel) as usize;
-                                let h_abs = (h_rel * heightpxf / heightrel) as usize;
-
-                                let byte_width_entire_row = widthpxs * 4;
-
-                                for y_rel_world in 0..h_abs {
-                                    let y_abs_world = y_abs + y_rel_world;
-                                    let y_abs_img = y_rel_world * heightimg / h_abs;
-                                    for x_rel_world in 0..w_abs {
-                                        let x_abs_world = x_abs + x_rel_world;
-                                        let x_abs_img = x_rel_world * widthimg / w_abs;
-                                        let mut bytepos_world = y_abs_world * byte_width_entire_row + x_abs_world * 4;
-                                        let mut bytepos_img = (y_abs_img * widthimg + x_abs_img) * 4;
-                                        data[bytepos_world] = bytes[bytepos_img];
-                                        bytepos_world += 1; bytepos_img += 1;
-                                        data[bytepos_world] = bytes[bytepos_img];
-                                        bytepos_world += 1; bytepos_img += 1;
-                                        data[bytepos_world] = bytes[bytepos_img];
-                                        bytepos_world += 1; bytepos_img += 1;
-                                        data[bytepos_world] = bytes[bytepos_img];
+                    WorldObjectData::Image {..} => Self {
+                        state: state,
+                        fns: WorldObject_Fns {
+                            draw_init: Box::new(|state: &mut WorldObject_State| {
+                                if let WorldObjectData::Image { rgba, width, height } = &mut state.data {
+                                    for y in 0..state.layer.pos_h {
+                                        let img_index_line = (y * *height / state.layer.pos_h) * *width;
+                                        for x in 0..state.layer.pos_w {
+                                            let img_index = (img_index_line + x * *width / state.layer.pos_w) * 4;
+                                            state.layer.pixel_data[y][x] = Pixel::Opaque { r: rgba[img_index], g: rgba[img_index+1], b: rgba[img_index+2], };
+                                        }
                                     }
                                 }
-                            }
-                        }),
-                        draw_required: false,
-                        draw_again:  Box::new(|s: &Self, widthpx: u32, heightpx: u32, widthrel: f32, heightrel: f32, data: &mut Vec<u8>| {}),
+                            }),
+                            draw_again:  Box::new(|state: &mut WorldObject_State, duration: &Duration| {
+                                state.layer.pos_x = state.layer.pos_x_start + (duration.as_millis() / 10 % 100) as usize;
+                            }),
+                        }
                     },
                 }
             }

@@ -3,14 +3,14 @@ use wasm_bindgen::{closure::Closure, JsCast};
 use web_sys::{CanvasRenderingContext2d as RenderingContext, Performance, Window, Document};
 use std::{rc::Rc, cell::RefCell, time::Duration, collections::VecDeque, sync::mpsc::{self, Sender, Receiver}};
 
-use crate::{world};
+use crate::{world::{self, world::Object::Objects::{WorldObject, WorldObjectData}, render_world_layers::Pixel}};
 
 pub struct ImpInfo {
     pub context: RenderingContext,
     pub document: Document,
     pub window: Window,
-    pub width: u32,
-    pub height: u32,
+    pub width: usize,
+    pub height: usize,
     pub image_bytes: Vec<u8>,
     pub world_renderer: world::render_world::WorldRenderer,
     pub message_sender: Sender<Interactions>,
@@ -55,9 +55,9 @@ fn render(info: &mut ImpInfo) {
                 match received {
                     Interactions::MouseDown { button, x, y } => {},
                     Interactions::MouseMove { button, x, y } => {
-                        let light = &mut world_renderer.world.renderable.lights_rendered[0];
-                        light.x = (-1.0 + 2.0 * x as f32 / window_width_f) * world_renderer.world.renderable.width;
-                        light.y = (-1.0 + 2.0 * y as f32 / window_height_f) * world_renderer.world.renderable.height;
+                        let light = &mut world_renderer.world.lights_rendered[0];
+                        light.x = (-1.0 + 2.0 * x as f32 / window_width_f) * world_renderer.world.width;
+                        light.y = (-1.0 + 2.0 * y as f32 / window_height_f) * world_renderer.world.height;
                     },
                 }
             },
@@ -74,13 +74,13 @@ fn render(info: &mut ImpInfo) {
         world_renderer.world.renderable.lights_rendered[0].x = -world_renderer.world.renderable.width * 2.0;
     }
     */
-    world_renderer.world.renderable.lights_rendered[1].x += 7.0;
-    if world_renderer.world.renderable.lights_rendered[1].x > world_renderer.world.renderable.width * 2.0 {
-        world_renderer.world.renderable.lights_rendered[1].x = -world_renderer.world.renderable.width * 2.0;
+    world_renderer.world.lights_rendered[1].x += 7.0;
+    if world_renderer.world.lights_rendered[1].x > world_renderer.world.width * 2.0 {
+        world_renderer.world.lights_rendered[1].x = -world_renderer.world.width * 2.0;
     }
-    world_renderer.world.renderable.lights_rendered[2].x += -3.0;
-    if world_renderer.world.renderable.lights_rendered[2].x < -world_renderer.world.renderable.width * 2.0 {
-        world_renderer.world.renderable.lights_rendered[2].x = world_renderer.world.renderable.width * 2.0;
+    world_renderer.world.lights_rendered[2].x += -3.0;
+    if world_renderer.world.lights_rendered[2].x < -world_renderer.world.width * 2.0 {
+        world_renderer.world.lights_rendered[2].x = world_renderer.world.width * 2.0;
     }
     // render data to array
     let durations;
@@ -88,45 +88,32 @@ fn render(info: &mut ImpInfo) {
         durations = world_renderer.render(image_bytes);
     }
     // put image data
-    let image_data = web_sys::ImageData::new_with_u8_clamped_array(wasm_bindgen::Clamped(image_bytes), width).unwrap();
+    let image_data = web_sys::ImageData::new_with_u8_clamped_array(wasm_bindgen::Clamped(image_bytes), width as u32).unwrap();
     match context.put_image_data(&image_data, 0.0, 0.0) { Ok(_) => {}, Err(_) => {}, }
     let time_render = time_start.elapsed();
     document.set_title(format!("Took {}={}+{}+{}ms to render {}x{}px", time_render.as_millis(), durations[0].as_millis(), durations[1].as_millis(), durations[2].as_millis(), width, height).as_str());
 }
 
-pub fn init_renderer(gl: RenderingContext, width: u32, height: u32, window: Window, document: Document) {
+pub fn init_renderer(gl: RenderingContext, width: usize, height: usize, window: Window, document: Document) {
 
     web_sys::console::log_1(&"Initializing renderer...".into());
     //let start_time = wasm_timer::Instant::now();
 
-    let mut world_renderer = world::render_world::WorldRenderer::new(world::world::World::new(world::world::WorldRenderable::new(1600f32/9f32, 100f32)), width, height);
+    let mut world_renderer = world::render_world::WorldRenderer::new(world::world::World::new(1600f32/9f32, 100f32), width, height);
     let width = world_renderer.width;
     let height = world_renderer.height;
 
-    world_renderer.world.renderable.lights_rendered.push(world::world::Object::Objects::LightObject::new(0.0, 0.0, (50000, 50000, 50000), 50.0, 50.0));
-    world_renderer.world.renderable.lights_rendered.push(world::world::Object::Objects::LightObject::new(0.0, -100.0, (00000, 50000, 50000), 25.0, 50.0));
-    world_renderer.world.renderable.lights_rendered.push(world::world::Object::Objects::LightObject::new(0.0, 100.0, (50000, 20000, 20000), 25.0, 75.0));
-
-    /*
-    world_renderer.world.renderable.objects_rendered.push(Box::new(world::world::Object::Objects::WorldObject::new(world::world::Object::Objects::WorldObjectData::
-        Rectangle((0.0, 25.0, 1600f32/9f32, 50.0, 255, 255, 255))
-    )));
-    world_renderer.world.renderable.objects_rendered.push(Box::new(world::world::Object::Objects::WorldObject::new(world::world::Object::Objects::WorldObjectData::
-        Rectangle((16f32/9f32 * 20.0, 10.0, 16f32/9f32 * 20.0, 20.0, 255, 0, 0))
-    )));
-    world_renderer.world.renderable.objects_rendered.push(Box::new(world::world::Object::Objects::WorldObject::new(world::world::Object::Objects::WorldObjectData::
-        Rectangle((16f32/9f32 * 60.0, 10.0, 16f32/9f32 * 20.0, 20.0, 0, 255, 0))
-    )));
-    world_renderer.world.renderable.objects_rendered.push(Box::new(world::world::Object::Objects::WorldObject::new(world::world::Object::Objects::WorldObjectData::
-        Rectangle((16f32/9f32 * 40.0, 70.0, 16f32/9f32 * 20.0, 20.0, 0, 0, 255))
-    )));
-    */
+    world_renderer.world.lights_rendered.push(world::world::Object::Objects::LightObject::new(0.0, 0.0, (50000, 50000, 50000), 50.0, 50.0));
+    world_renderer.world.lights_rendered.push(world::world::Object::Objects::LightObject::new(0.0, -100.0, (00000, 50000, 50000), 25.0, 50.0));
+    world_renderer.world.lights_rendered.push(world::world::Object::Objects::LightObject::new(0.0, 100.0, (50000, 20000, 20000), 25.0, 75.0));
     
     {
         let img = crate::assets::image_loader_hardcoded::get_image1_raw_bytes();
-        world_renderer.world.renderable.objects_rendered.push(Box::new(world::world::Object::Objects::WorldObject::new(world::world::Object::Objects::WorldObjectData::
-            Image((img.0, img.1, img.2, 0.0, 0.0, 1600.0/9.0, 100.0))
-        )));
+        //world_renderer.world.objects_rendered.push(WorldObject::new_rel(WorldObjectData::Rectangle { color: Pixel::Opaque { r: 255, g: 255, b: 255 } }, 0.0, 0.0, 1.0, 1.0, width, height));
+        //world_renderer.world.objects_rendered.push(WorldObject::new_rel(WorldObjectData::Rectangle { color: Pixel::Opaque { r: 255, g: 127, b: 0 } }, 0.0, 0.25, 0.5, 0.5, width, height));
+        //world_renderer.world.objects_rendered.push(WorldObject::new_rel(WorldObjectData::Rectangle { color: Pixel::Opaque { r: 0, g: 127, b: 255 } }, 0.5, 0.25, 0.5, 0.5, width, height));
+        //world_renderer.world.objects_rendered.push(WorldObject::new_rel(WorldObjectData::Rectangle { color: Pixel::Opaque { r: 255, g: 127, b: 0 } }, 0.0, 0.25, 0.5, 0.5, width, height));
+        world_renderer.world.objects_rendered.push(WorldObject::new_rel(WorldObjectData::Image { rgba: img.0, width: img.1, height: img.2 }, 0.1, 0.1, 0.8, 0.8, width, height))
     }
 
     world_renderer.init();

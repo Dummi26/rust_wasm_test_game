@@ -60,7 +60,7 @@ pub fn main_js() -> Result<(), JsValue> {
         let context: RenderingContext = context.dyn_into().unwrap();
         // context.clear_color(0.0, 0.0, 0.0, 1.0);
         // context.clear(RenderingContext::COLOR_BUFFER_BIT);
-        renderer::init_renderer(context, pixel_width_i, pixel_height_i, window, document);
+        renderer::init_renderer(context, pixel_width_i as usize, pixel_height_i as usize, window, document);
     }
 
     Ok(())
